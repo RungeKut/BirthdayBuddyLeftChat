@@ -10,16 +10,16 @@
 
 	<Target Name="PostPublish" AfterTargets="Publish" Condition="'$(BuildingInsideVisualStudio)' == 'true' AND '$(CI)' != 'true'">
 		<!-- Останавливаем службу -->
-		<Exec Command="ssh root@telegram.local &quot;systemctl stop BirthdayBuddyLeftChat.service&quot;" />
+		<Exec Command="ssh -p 8022 admin@truenas.local &quot;sudo systemctl stop BirthdayBuddyLeftChat.service&quot;" />
 		
 		<!-- Копируем Settings.json в папку публикации -->
 		<Copy SourceFiles="$(ProjectDir)bin\$(Configuration)\net8.0\Settings.json" DestinationFolder="$(PublishDir)" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
 		<!-- Копируем всю публикацию на сервер -->
-		<Exec Command="scp -r &quot;$(PublishDir)*&quot; root@telegram.local:/root/publish/BirthdayBuddyLeftChat" />
+		<Exec Command="scp -P 8022 -r &quot;$(PublishDir)*&quot; admin@truenas.local:/home/admin/publish/BirthdayBuddyLeftChat" />
 
 		<!-- Запускаем службу -->
-		<Exec Command="ssh root@telegram.local &quot;systemctl start BirthdayBuddyLeftChat.service&quot;" />
-		<Exec Command="ssh root@telegram.local &quot;systemctl status BirthdayBuddyLeftChat.service --no-pager&quot;" />
+		<Exec Command="ssh -p 8022 admin@truenas.local &quot;sudo systemctl start BirthdayBuddyLeftChat.service&quot;" />
+		<Exec Command="ssh -p 8022 admin@truenas.local &quot;sudo systemctl status BirthdayBuddyLeftChat.service --no-pager&quot;" />
 	</Target>
 
 	<ItemGroup>
