@@ -39,13 +39,22 @@ namespace BirthdayBuddyLeftChat.Services
             if (_currentListFutureBirthDay == null) { _currentListFutureBirthDay = new(); state = true; }
             if (_lastListFutureBirthDay == null) { _lastListFutureBirthDay = new(); state = true; }
             if (state) return true;
+            // Проверяем, что оба списка содержат ключ chatId перед доступом к нему
+            if (!_currentListFutureBirthDay.ContainsKey(chatId) || !_lastListFutureBirthDay.ContainsKey(chatId))
+                return true;
             return _currentListFutureBirthDay[chatId].Count == _lastListFutureBirthDay[chatId].Count && _currentListFutureBirthDay[chatId].ToHashSet().SetEquals(_lastListFutureBirthDay[chatId]);
         }
 
         public void SaveBirthdaysList(long chatId)
         {
             if (_lastListFutureBirthDay != null)
-                _lastListFutureBirthDay[chatId] = new(_currentListFutureBirthDay == null ? new() : _currentListFutureBirthDay[chatId]);
+            {
+                // Добавляем проверку на существование ключа
+                if (!_currentListFutureBirthDay!.ContainsKey(chatId))
+                    _currentListFutureBirthDay[chatId] = new List<UserBirthday>();
+
+                _lastListFutureBirthDay[chatId] = new(_currentListFutureBirthDay[chatId]);
+            }
         }
 
         public string GenerateUpcomingBirthdaysText(long chatId, int daysAhead = 15)
