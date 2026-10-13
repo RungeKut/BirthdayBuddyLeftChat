@@ -1,4 +1,4 @@
-﻿using BirthdayBuddyLeftChat.Services;
+using BirthdayBuddyLeftChat.Services;
 
 namespace BirthdayBuddyLeftChat
 {
@@ -22,12 +22,20 @@ namespace BirthdayBuddyLeftChat
             var botTask = BotClient.Instance.StartAsync(cts.Token);
 
             // Запускаем ежедневную проверку
-            await BirthdayService.Instance.StartDailyCheck(
+            var dailyTask = BirthdayService.Instance.StartDailyCheck(
                 sendMessage: BotClient.Instance.SendMessageAsync,
                 botClient: BotClient.Instance.botClient!,
                 ct: cts.Token);
 
-            await botTask;
+            try
+            {
+                await Task.WhenAll(botTask, dailyTask);
+            }
+            catch (OperationCanceledException)
+            {
+                // Штатная остановка по Ctrl+C
+            }
+            Console.WriteLine("Приложение остановлено.");
         }
     }
 }

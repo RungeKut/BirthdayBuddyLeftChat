@@ -1,4 +1,4 @@
-﻿using BirthdayBuddyLeftChat.Models;
+using BirthdayBuddyLeftChat.Models;
 using BirthdayBuddyLeftChat.Services;
 using System.Collections.Generic;
 using System.Data;
@@ -10,6 +10,7 @@ using System.Threading;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
+using Telegram.Bot.Requests;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.Payments;
@@ -37,6 +38,9 @@ namespace BirthdayBuddyLeftChat
 
         // Это объект с настройками работы бота. Здесь мы будем указывать, какие типы Update мы будем получать, Timeout бота и так далее.
         private static ReceiverOptions? _receiverOptions;
+
+        // Offset последнего подтверждённого update — цикл приёма продолжает с того же места после самоперезапуска
+        private int _messageOffset;
 
         public BotClient(string token)
         {
@@ -86,37 +90,95 @@ namespace BirthdayBuddyLeftChat
                 }
             };
 
-            using var cts = new CancellationTokenSource();
-
-            // UpdateHander - обработчик приходящих Update`ов
-            // ErrorHandler - обработчик ошибок, связанных с Bot API
-            // Запускаем приём обновлений
-            _botClient!.StartReceiving(
-                updateHandler: UpdateHandler,
-                errorHandler: ErrorHandler,
-                receiverOptions: _receiverOptions,
-                cancellationToken: cts.Token
-            ); // Запускаем бота
-
-            User me = await _botClient!.GetMe(); // Создаем переменную, в которую помещаем информацию о нашем боте.
-            Console.WriteLine($"{me.FirstName} запущен!");
-
-            // =============== Основной цикл — каждые 10 минут ===============
-            while (!cts.Token.IsCancellationRequested)
+            // Проверяем токен и связь с API. Служба может стартовать раньше поднятия сети,
+            // поэтому повторяем попытки, а не падаем с необработанной ошибкой в задаче.
+            User? me = null;
+            while (me is null && !ct.IsCancellationRequested)
             {
                 try
                 {
-                    
+                    me = await _botClient!.GetMe(ct); // Создаем переменную, в которую помещаем информацию о нашем боте.
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Ошибка: {ex.Message}");
+                    Console.WriteLine($"Нет связи с Telegram API ({ex.Message}). Повтор через 10 сек...");
+                    try { await Task.Delay(10_000, ct); } catch (OperationCanceledException) { break; }
+                }
+            }
+            if (me is null) return;
+            Console.WriteLine($"{me.FirstName} запущен!");
+
+            // Фоновый приём обновлений. Если цикл приёма по любой причине завершится —
+            // перезапускаем его, чтобы бот не «молчал» после сбоев сети.
+            _ = Task.Run(async () =>
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await ReceiveLoopAsync(ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Цикл приёма обновлений прерван: {ex.Message}");
+                    }
+
+                    if (!ct.IsCancellationRequested)
+                    {
+                        try { await Task.Delay(5_000, ct); } catch (OperationCanceledException) { }
+                    }
+                }
+            }, ct);
+        }
+
+        /// <summary>
+        /// Собственный цикл long polling. В отличие от StartReceiving из Telegram.Bot
+        /// (где OperationCanceledException молча завершает приём обновлений без errorHandler),
+        /// здесь любая ошибка GetUpdates логируется и цикл продолжается — в том числе
+        /// после обрыва и восстановления интернет-соединения.
+        /// </summary>
+        private async Task ReceiveLoopAsync(CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                Update[] updates;
+                try
+                {
+                    // timeout = 30 c меньше HttpClient.Timeout (100 c по умолчанию),
+                    // чтобы клиент не обрывал долгий опрос по собственному таймауту
+                    var request = new GetUpdatesRequest
+                    {
+                        Limit = 100,
+                        Offset = _messageOffset,
+                        AllowedUpdates = _receiverOptions!.AllowedUpdates,
+                        Timeout = 30,
+                    };
+                    updates = await _botClient!.SendRequest(request, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    await ErrorHandler(_botClient!, ex, ct);
+                    try { await Task.Delay(5_000, ct); } catch (OperationCanceledException) { return; }
+                    continue;
                 }
 
-                // Асинхронная задержка — не блокирует поток
-                await Task.Delay(TimeSpan.FromMinutes(10), cts.Token);
+                foreach (Update update in updates)
+                {
+                    _messageOffset = update.Id + 1;
+                    try
+                    {
+                        await UpdateHandler(_botClient!, update, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Ошибка обработки update {update.Id}: {ex.Message}");
+                    }
+                }
             }
-            Console.WriteLine($"{me.FirstName} остановлен!");
         }
 
         private static async Task UpdateHandler(ITelegramBotClient bot, Update update, CancellationToken ct)
@@ -998,17 +1060,22 @@ namespace BirthdayBuddyLeftChat
             return Task.CompletedTask;
         }
 
-        public Task SendMessageAsync(long chatId, string message)
+        public async Task SendMessageAsync(long chatId, string message)
         {
-            try
+            const int maxAttempts = 3;
+            for (int attempt = 1; ; attempt++)
             {
-                _botClient!.SendMessage(chatId, message, parseMode: ParseMode.Markdown);
-                return Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Send failed to {chatId}: {ex.Message}");
-                return Task.CompletedTask;
+                try
+                {
+                    await _botClient!.SendMessage(chatId, message, parseMode: ParseMode.Markdown);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ Send failed to {chatId} (попытка {attempt}/{maxAttempts}): {ex.Message}");
+                    if (attempt >= maxAttempts) return;
+                    await Task.Delay(5_000);
+                }
             }
         }
     }

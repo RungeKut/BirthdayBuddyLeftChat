@@ -1,4 +1,4 @@
-﻿using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.Enums;
 using Telegram.Bot;
 
 namespace BirthdayBuddyLeftChat.Services
@@ -32,7 +32,14 @@ namespace BirthdayBuddyLeftChat.Services
                 var delay = nextRun - now;
 
                 Console.WriteLine($"[{now:T}] Следующая проверка: {nextRun:dd.MM HH:mm}");
-                await Task.Delay(delay, ct);
+                try
+                {
+                    await Task.Delay(delay, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
                 if (ct.IsCancellationRequested) break;
 
                 try
@@ -43,10 +50,15 @@ namespace BirthdayBuddyLeftChat.Services
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Ошибка: {ex.Message}");
-                    await sendMessage(Settings.Instance.RootId, $"❌ Ошибка в ежедневной проверке: {ex.Message}");
+                    try
+                    {
+                        await sendMessage(Settings.Instance.RootId, $"❌ Ошибка в ежедневной проверке: {ex.Message}");
+                    }
+                    catch (Exception sendEx)
+                    {
+                        Console.WriteLine($"Не удалось отправить отчёт об ошибке: {sendEx.Message}");
+                    }
                 }
-
-                delay = TimeSpan.FromHours(24);
             }
         }
 

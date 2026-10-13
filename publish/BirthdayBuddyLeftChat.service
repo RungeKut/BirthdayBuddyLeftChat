@@ -1,6 +1,7 @@
 [Unit]
 Description=BirthdayBuddyLeftChat Bot service
-After=syslog.target network.target
+Wants=network-online.target
+After=network-online.target syslog.target
 
 [Service]
 SuccessExitStatus=143
@@ -9,7 +10,7 @@ User=root
 
 WorkingDirectory=/root/publish/BirthdayBuddyLeftChat/
 ExecStart=/root/publish/BirthdayBuddyLeftChat/BirthdayBuddyLeftChat
-Restart=on-failure
+Restart=always
 RestartSec=10
 TimeoutStopSec=10
 
