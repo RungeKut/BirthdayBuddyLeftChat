@@ -8,8 +8,8 @@ SuccessExitStatus=143
 
 User=root
 
-WorkingDirectory=/root/publish/BirthdayBuddyLeftChat/
-ExecStart=/root/publish/BirthdayBuddyLeftChat/BirthdayBuddyLeftChat
+WorkingDirectory=/home/admin/publish/BirthdayBuddyLeftChat/
+ExecStart=/home/admin/publish/BirthdayBuddyLeftChat/BirthdayBuddyLeftChat
 Restart=always
 RestartSec=10
 TimeoutStopSec=10
