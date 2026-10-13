@@ -42,6 +42,9 @@ namespace BirthdayBuddyLeftChat
         // Offset последнего подтверждённого update — цикл приёма продолжает с того же места после самоперезапуска
         private int _messageOffset;
 
+        // Username бота (из GetMe) — нужен, чтобы отличать команды /cmd@НашБот от чужих /cmd@ДругойБот
+        private string? _botUserName;
+
         public BotClient(string token)
         {
             _botClient = new TelegramBotClient(token);  // Присваиваем нашей переменной значение, в параметре передаем Token, полученный от BotFather
@@ -107,6 +110,28 @@ namespace BirthdayBuddyLeftChat
             }
             if (me is null) return;
             Console.WriteLine($"{me.FirstName} запущен!");
+            _botUserName = me.Username;
+
+            // Регистрируем список команд: тогда в автодополнении и меню бота
+            // показываются настоящие команды с описаниями.
+            try
+            {
+                await _botClient.SetMyCommands(
+                [
+                    new BotCommand { Command = "start",  Description = "Начало работы, справка по командам" },
+                    new BotCommand { Command = "add",    Description = "Добавить: /add ФИО,ДД.ММ.ГГГГ" },
+                    new BotCommand { Command = "edit",   Description = "Изменить дату: /edit ФИО,ДД.ММ.ГГГГ" },
+                    new BotCommand { Command = "del",    Description = "Удалить запись: /del ФИО" },
+                    new BotCommand { Command = "clear",  Description = "Удалить всех именинников" },
+                    new BotCommand { Command = "list",   Description = "Список именинников" },
+                    new BotCommand { Command = "sync",   Description = "Привязать свой Telegram к записи" },
+                    new BotCommand { Command = "export", Description = "Выгрузить список в CSV" },
+                ], cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Не удалось зарегистрировать команды: {ex.Message}");
+            }
 
             // Фоновый приём обновлений. Если цикл приёма по любой причине завершится —
             // перезапускаем его, чтобы бот не «молчал» после сбоев сети.
@@ -218,7 +243,18 @@ namespace BirthdayBuddyLeftChat
                             if (match.Success)
                             {
                                 cmd = match.Groups[1].Value;
-                                data = message.Text?.Replace($"/{cmd}", "").Trim();
+
+                                // В группах Telegram присылает команды вида /команда@ИмяБота.
+                                // Отсекаем упоминание, а команды, адресованные другим ботам, игнорируем.
+                                int atIndex = cmd.IndexOf('@');
+                                if (atIndex >= 0)
+                                {
+                                    if (!cmd.Substring(atIndex + 1).Equals(_instance?._botUserName, StringComparison.OrdinalIgnoreCase))
+                                        break;
+                                    cmd = cmd.Substring(0, atIndex);
+                                }
+
+                                data = message.Text?.Replace($"/{match.Groups[1].Value}", "").Trim();
                             }
                             //else
                             //{
